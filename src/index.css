@@ -93,6 +93,12 @@ h1 {
   flex-wrap: wrap;
 }
 
+.save-status {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin: -1rem 0 1.5rem;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -181,6 +187,22 @@ td {
   background: #eff6ff;
 }
 
+.marks-input-error {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.notice {
+  color: #166534;
+  font-size: 0.9rem;
+  margin: -0.5rem 0 1.25rem;
+}
+
+.notice-error {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
 /* Print Styles */
 @media print {
   @page {
@@ -248,6 +270,16 @@ td {
 
 .print-table {
   border: 1px solid black;
+}
+
+.print-final-sheet {
+  break-before: page;
+  page-break-before: always;
+}
+
+.final-words-table th,
+.final-words-table td {
+  white-space: nowrap;
 }
 
 .sign-row {

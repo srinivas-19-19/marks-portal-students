@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { FileSpreadsheet, Printer, Trash2, Plus, Layout } from 'lucide-react';
 
@@ -11,48 +11,193 @@ const INITIAL_STUDENT = {
   assign1: '', assign2: ''
 };
 
+const WORKSPACE_STORAGE_KEY = 'svce-marks-portal-workspace-v1';
+
+const createDefaultWorkspace = () => ({
+  calculationMode: 'single',
+  program: 'B.Tech',
+  regulation: 'R23',
+  department: 'CSE',
+  year: 'II',
+  semesterNum: 'II',
+  examType: 'I Internal Examinations',
+  examMonthYear: 'Feb - 2026',
+  facultyName: '',
+  courseCode: '',
+  subjectName: '',
+  students: [{ ...INITIAL_STUDENT }]
+});
+
+const loadSavedWorkspace = () => {
+  const fallback = createDefaultWorkspace();
+  try {
+    const saved = JSON.parse(localStorage.getItem(WORKSPACE_STORAGE_KEY));
+    if (!saved || typeof saved !== 'object') return fallback;
+    return {
+      ...fallback,
+      ...saved,
+      students: Array.isArray(saved.students) && saved.students.length
+        ? saved.students.map(student => ({ ...INITIAL_STUDENT, ...student }))
+        : fallback.students
+    };
+  } catch {
+    return fallback;
+  }
+};
+
 const PROGRAMS = ['B.Tech', 'M.Tech', 'MBA', 'MCA', 'PHD'];
-const REGULATIONS = ['R20', 'R23', 'R24', 'R25'];
+const REGULATIONS = ['R20', 'R23', 'R24', 'R25', 'R26'];
 const DEPARTMENTS = ['CSE', 'ECE', 'CIVIL', 'MEC', 'CSC', 'ETC'];
 const YEARS = ['I', 'II', 'III', 'IV'];
 const SEMESTERS = ['I', 'II'];
 const EXAM_TYPES = ['I Internal Examinations', 'II Internal Examinations', 'Pre-Final Examinations'];
-
-// Mock Faculty Data mapped by Department
-const MOCK_FACULTY = {
-  CSE: ['Sheshadri', 'John Doe', 'Dr. Smith', 'Prof. Alan'],
-  ECE: ['Dr. Ramesh', 'Sivakumar', 'Prof. Reddy'],
-  CIVIL: ['Anil Kumar', 'Dr. Sharma'],
-  MEC: ['Dr. Rao', 'Vikram'],
-  CSC: ['Priya', 'Dr. Venkatesh'],
-  ETC: ['Sanjay', 'Dr. Kumar']
+const MARK_LIMITS = {
+  q1: 10, q2: 10, q3: 10, q4: 10, q5: 10, q6: 10,
+  objective: 10, mid1: 25, mid2: 25, assign1: 5, assign2: 5
 };
+const SINGLE_MARK_FIELDS = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'objective'];
+const CONSOLIDATED_MARK_FIELDS = ['mid1', 'mid2', 'assign1', 'assign2'];
+
+const DIGIT_WORDS = ['ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'];
 
 function App() {
-  const [calculationMode, setCalculationMode] = useState('single');
+  const [savedWorkspace] = useState(loadSavedWorkspace);
+  const [calculationMode, setCalculationMode] = useState(savedWorkspace.calculationMode);
   
   // V2 Exam Metadata States
-  const [program, setProgram] = useState('B.Tech');
-  const [regulation, setRegulation] = useState('R23');
-  const [department, setDepartment] = useState('CSE');
-  const [year, setYear] = useState('II');
-  const [semesterNum, setSemesterNum] = useState('II');
-  const [examType, setExamType] = useState('I Internal Examinations');
-  const [examMonthYear, setExamMonthYear] = useState('Feb - 2026');
+  const [program, setProgram] = useState(savedWorkspace.program);
+  const [regulation, setRegulation] = useState(savedWorkspace.regulation);
+  const [department, setDepartment] = useState(savedWorkspace.department);
+  const [year, setYear] = useState(savedWorkspace.year);
+  const [semesterNum, setSemesterNum] = useState(savedWorkspace.semesterNum);
+  const [examType, setExamType] = useState(savedWorkspace.examType);
+  const [examMonthYear, setExamMonthYear] = useState(savedWorkspace.examMonthYear);
   
-  const [facultyName, setFacultyName] = useState('');
-  const [courseCode, setCourseCode] = useState('');
-  const [subjectName, setSubjectName] = useState('');
+  const [facultyName, setFacultyName] = useState(savedWorkspace.facultyName);
+  const [courseCode, setCourseCode] = useState(savedWorkspace.courseCode);
+  const [subjectName, setSubjectName] = useState(savedWorkspace.subjectName);
   
-  const [students, setStudents] = useState([INITIAL_STUDENT]);
+  const [students, setStudents] = useState(savedWorkspace.students);
   const fileInputRef = useRef(null);
+  const backupInputRef = useRef(null);
+  const [saveStatus, setSaveStatus] = useState('Saved locally');
+  const [notice, setNotice] = useState('');
 
   // Derived Values
-  const availableFaculty = useMemo(() => MOCK_FACULTY[department] || [], [department]);
-  
   const generatedSemesterString = useMemo(() => {
-    return `${year} ${program} ${semesterNum} Semester (${department}) ${examType} ${examMonthYear}`;
-  }, [year, program, semesterNum, department, examType, examMonthYear]);
+    return `${year} ${program} ${semesterNum} Semester (${department}) ${regulation} ${examType} ${examMonthYear}`;
+  }, [year, program, semesterNum, department, regulation, examType, examMonthYear]);
+
+  const activeMarkFields = calculationMode === 'single' ? SINGLE_MARK_FIELDS : CONSOLIDATED_MARK_FIELDS;
+
+  const getMarkError = (field, value) => {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    const number = Number(text);
+    if (!Number.isFinite(number)) return 'Enter a valid number.';
+    if (!Number.isInteger(number)) return 'Marks must be whole numbers.';
+    if (number < 0 || number > MARK_LIMITS[field]) return `Enter a mark from 0 to ${MARK_LIMITS[field]}.`;
+    return '';
+  };
+
+  const markErrors = useMemo(() => students.flatMap((student, index) => activeMarkFields
+    .map(field => ({ row: index + 1, field, message: getMarkError(field, student[field]) }))
+    .filter(error => error.message)), [students, activeMarkFields]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+        calculationMode, program, regulation, department, year, semesterNum,
+        examType, examMonthYear, facultyName, courseCode, subjectName, students
+      }));
+      setSaveStatus('Saved locally');
+    } catch {
+      setSaveStatus('Local save unavailable');
+    }
+  }, [calculationMode, program, regulation, department, year, semesterNum, examType, examMonthYear, facultyName, courseCode, subjectName, students]);
+
+  const applyWorkspace = (workspace) => {
+    const normalized = {
+      ...createDefaultWorkspace(),
+      ...workspace,
+      students: Array.isArray(workspace.students) && workspace.students.length
+        ? workspace.students.map(student => ({ ...INITIAL_STUDENT, ...student }))
+        : [{ ...INITIAL_STUDENT }]
+    };
+    setCalculationMode(normalized.calculationMode);
+    setProgram(normalized.program);
+    setRegulation(normalized.regulation);
+    setDepartment(normalized.department);
+    setYear(normalized.year);
+    setSemesterNum(normalized.semesterNum);
+    setExamType(normalized.examType);
+    setExamMonthYear(normalized.examMonthYear);
+    setFacultyName(normalized.facultyName);
+    setCourseCode(normalized.courseCode);
+    setSubjectName(normalized.subjectName);
+    setStudents(normalized.students);
+  };
+
+  const exportBackup = () => {
+    const workspace = { calculationMode, program, regulation, department, year, semesterNum, examType, examMonthYear, facultyName, courseCode, subjectName, students };
+    const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `marks-workspace-${courseCode || 'backup'}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const importBackup = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const workspace = JSON.parse(evt.target.result);
+        if (!workspace || typeof workspace !== 'object' || !Array.isArray(workspace.students)) throw new Error('Invalid backup');
+        applyWorkspace(workspace);
+        setSaveStatus('Backup restored and saved locally');
+      } catch {
+        setSaveStatus('Could not read that backup file');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const clearWorkspace = () => {
+    if (window.confirm('Clear the current marks workspace? Export a backup first if you need these entries.')) {
+      applyWorkspace(createDefaultWorkspace());
+    }
+  };
+
+  const handlePrint = () => {
+    if (markErrors.length) {
+      setNotice(`Fix ${markErrors.length} invalid mark${markErrors.length === 1 ? '' : 's'} before printing.`);
+      return;
+    }
+    setNotice('');
+    window.print();
+  };
+
+  const MarkInput = ({ student, index, field, width }) => {
+    const error = getMarkError(field, student[field]);
+    return <input
+      className={`marks-input${error ? ' marks-input-error' : ''}`}
+      style={width ? { maxWidth: width } : undefined}
+      type="number"
+      min="0"
+      max={MARK_LIMITS[field]}
+      step="1"
+      inputMode="numeric"
+      value={student[field]}
+      aria-label={`${field} marks for ${student.name || `student ${index + 1}`}`}
+      aria-invalid={Boolean(error)}
+      title={error || `Enter a whole number from 0 to ${MARK_LIMITS[field]}.`}
+      onChange={(e) => updateStudentField(index, field, e.target.value)}
+    />;
+  };
 
   const calculateResult = (student) => {
     if (calculationMode === 'single') {
@@ -97,23 +242,60 @@ function App() {
 
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const bstr = evt.target.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      try {
+        const workbook = XLSX.read(evt.target.result, { type: 'array' });
+        const normalizeHeader = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const rollHeaders = ['rollno', 'rollnumber', 'hallticketnumber', 'htno'];
+        const nameHeaders = ['name', 'nameofstudent', 'nameofthestudent', 'studentname'];
+        const fieldHeaders = {
+          q1: ['q1'], q2: ['q2'], q3: ['q3'], q4: ['q4'], q5: ['q5'], q6: ['q6'],
+          objective: ['objective', 'obj'], mid1: ['mid1', 'midi'], mid2: ['mid2', 'midii'],
+          assign1: ['assign1', 'assignment1'], assign2: ['assign2', 'assignment2']
+        };
 
-      const processed = data
-        .filter(row => row.length >= 2 && row[0] && row[1])
-        .map(row => ({
-          ...INITIAL_STUDENT,
-          rollNo: String(row[0] || ''),
-          name: String(row[1] || ''),
-        }))
-        .filter(s => !['roll no', 's.no', 'serial'].includes(s.rollNo.toLowerCase()) && s.rollNo.length > 2);
+        let importedStudents = null;
+        for (const sheetName of workbook.SheetNames) {
+          const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' });
+          const headerIndex = rows.findIndex((row, index) => index < 20 && row.some(cell => rollHeaders.includes(normalizeHeader(cell))) && row.some(cell => nameHeaders.includes(normalizeHeader(cell))));
+          if (headerIndex === -1) continue;
 
-      setStudents(processed);
+          const headers = rows[headerIndex].map(normalizeHeader);
+          const rollIndex = headers.findIndex(header => rollHeaders.includes(header));
+          const nameIndex = headers.findIndex(header => nameHeaders.includes(header));
+          const columns = Object.fromEntries(Object.entries(fieldHeaders).map(([field, aliases]) => [field, headers.findIndex(header => aliases.includes(header))]));
+          const processed = rows.slice(headerIndex + 1)
+            .filter(row => String(row[rollIndex] ?? '').trim() && String(row[nameIndex] ?? '').trim())
+            .map(row => {
+              const student = { ...INITIAL_STUDENT, rollNo: String(row[rollIndex]).trim(), name: String(row[nameIndex]).trim() };
+              Object.entries(columns).forEach(([field, column]) => {
+                if (column >= 0 && row[column] !== '') student[field] = String(row[column]).trim();
+              });
+              return student;
+            });
+          if (processed.length) {
+            importedStudents = processed;
+            break;
+          }
+        }
+
+        if (!importedStudents) {
+          setNotice('No students were imported. Use a sheet with Roll No and Name/Name of the Student headers.');
+          return;
+        }
+        setStudents(importedStudents);
+        setNotice(`${importedStudents.length} students imported successfully.`);
+      } catch {
+        setNotice('Could not read that file. Please upload a valid Excel or CSV file.');
+      }
     };
-    reader.readAsBinaryString(file);
+    reader.onerror = () => setNotice('Could not read that file. Please try again.');
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const getFinalMark = (student) => {
+    const result = calculateResult(student);
+    return calculationMode === 'single' ? result.final25 : result.final30;
   };
 
   const updateStudentField = (index, field, value) => {
@@ -146,6 +328,13 @@ function App() {
                 <FileSpreadsheet size={18} />
                 Template
               </button>
+              <button className="btn btn-outline" onClick={exportBackup} title="Download a portable copy of this workspace">
+                Backup
+              </button>
+              <button className="btn btn-outline" onClick={() => backupInputRef.current.click()} title="Restore a workspace backup">
+                Restore
+              </button>
+              <input type="file" ref={backupInputRef} accept="application/json,.json" style={{ display: 'none' }} onChange={importBackup} />
               <button 
                 className="btn btn-outline" 
                 onClick={() => setCalculationMode(calculationMode === 'single' ? 'consolidated' : 'single')}
@@ -173,10 +362,7 @@ function App() {
               </div>
               <div className="input-group">
                 <label>Department</label>
-                <select className="select-field" value={department} onChange={(e) => {
-                  setDepartment(e.target.value);
-                  setFacultyName(''); // Reset faculty when dept changes
-                }}>
+                <select className="select-field" value={department} onChange={(e) => setDepartment(e.target.value)}>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
@@ -209,10 +395,7 @@ function App() {
             <div className="form-grid">
               <div className="input-group">
                 <label>Faculty Name</label>
-                <select className="select-field" value={facultyName} onChange={(e) => setFacultyName(e.target.value)}>
-                  <option value="">-- Select Faculty --</option>
-                  {availableFaculty.map(f => <option key={f} value={f}>{f}</option>)}
-                </select>
+                <input className="input-field" value={facultyName} onChange={(e) => setFacultyName(e.target.value)} placeholder="Enter faculty name" />
               </div>
               <div className="input-group">
                 <label>Subject Name</label>
@@ -230,12 +413,18 @@ function App() {
               <FileSpreadsheet size={18} />
               Import Student Excel
             </button>
-            <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleExcelImport} />
-            <button className="btn btn-success" onClick={() => window.print()}>
+            <input type="file" ref={fileInputRef} accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" style={{ display: 'none' }} onChange={handleExcelImport} />
+            <button className="btn btn-success" onClick={handlePrint}>
               <Printer size={18} />
               Print Award List
             </button>
+            <button className="btn btn-outline" onClick={clearWorkspace}>
+              Clear Workspace
+            </button>
           </div>
+          <p className="save-status">{saveStatus}. This browser keeps a separate local workspace; use Backup/Restore to move work between devices or users.</p>
+          {notice && <p className="notice" role="status">{notice}</p>}
+          {markErrors.length > 0 && <p className="notice notice-error" role="alert">{markErrors.length} mark{markErrors.length === 1 ? '' : 's'} need correction before printing.</p>}
 
           <div className="table-container">
             <table>
@@ -272,22 +461,22 @@ function App() {
                       <td><input className="input-field" style={{ textAlign: 'left', padding: '0.4rem', fontSize: '0.85rem' }} value={student.name} onChange={(e) => updateStudentField(index, 'name', e.target.value)} /></td>
                       {calculationMode === 'single' ? (
                         <>
-                          <td><input className="marks-input" value={student.q1} onChange={(e) => updateStudentField(index, 'q1', e.target.value)} /></td>
-                          <td><input className="marks-input" value={student.q2} onChange={(e) => updateStudentField(index, 'q2', e.target.value)} /></td>
-                          <td><input className="marks-input" value={student.q3} onChange={(e) => updateStudentField(index, 'q3', e.target.value)} /></td>
-                          <td><input className="marks-input" value={student.q4} onChange={(e) => updateStudentField(index, 'q4', e.target.value)} /></td>
-                          <td><input className="marks-input" value={student.q5} onChange={(e) => updateStudentField(index, 'q5', e.target.value)} /></td>
-                          <td><input className="marks-input" value={student.q6} onChange={(e) => updateStudentField(index, 'q6', e.target.value)} /></td>
-                          <td><input className="marks-input" value={student.objective} onChange={(e) => updateStudentField(index, 'objective', e.target.value)} /></td>
+                          <td><MarkInput student={student} index={index} field="q1" /></td>
+                          <td><MarkInput student={student} index={index} field="q2" /></td>
+                          <td><MarkInput student={student} index={index} field="q3" /></td>
+                          <td><MarkInput student={student} index={index} field="q4" /></td>
+                          <td><MarkInput student={student} index={index} field="q5" /></td>
+                          <td><MarkInput student={student} index={index} field="q6" /></td>
+                          <td><MarkInput student={student} index={index} field="objective" /></td>
                           <td style={{ fontWeight: 800, color: 'var(--primary)', fontSize: '1.2rem' }}>{res.final25}</td>
                         </>
                       ) : (
                         <>
-                          <td><input className="marks-input" style={{ maxWidth: '80px' }} value={student.mid1} onChange={(e) => updateStudentField(index, 'mid1', e.target.value)} /></td>
-                          <td><input className="marks-input" style={{ maxWidth: '80px' }} value={student.mid2} onChange={(e) => updateStudentField(index, 'mid2', e.target.value)} /></td>
+                          <td><MarkInput student={student} index={index} field="mid1" width="80px" /></td>
+                          <td><MarkInput student={student} index={index} field="mid2" width="80px" /></td>
                           <td style={{ fontWeight: 600, color: '#334155' }}>{res.internalMarks25}</td>
-                          <td><input className="marks-input" style={{ maxWidth: '70px' }} value={student.assign1} onChange={(e) => updateStudentField(index, 'assign1', e.target.value)} /></td>
-                          <td><input className="marks-input" style={{ maxWidth: '70px' }} value={student.assign2} onChange={(e) => updateStudentField(index, 'assign2', e.target.value)} /></td>
+                          <td><MarkInput student={student} index={index} field="assign1" width="70px" /></td>
+                          <td><MarkInput student={student} index={index} field="assign2" width="70px" /></td>
                           <td style={{ fontWeight: 600, color: '#334155' }}>{res.assignment5}</td>
                           <td style={{ fontWeight: 800, color: 'var(--primary)', fontSize: '1.2rem' }}>{res.final30}</td>
                         </>
@@ -402,9 +591,65 @@ function App() {
         </table>
 
         <div className="sign-row">
-          <div className="sign-box">Faculty Sign</div>
-          <div className="sign-box">HOD Sign</div>
+          <div className="sign-box">Signature of Faculty</div>
+          <div className="sign-box">HoD</div>
         </div>
+
+        <section className="print-final-sheet">
+          <div className="print-header">
+            <h1>SV COLLEGE OF ENGINEERING</h1>
+            <div style={{ fontWeight: 'bold' }}>(AUTONOMOUS)</div>
+            <div style={{ fontSize: '0.8rem' }}>Karakambadi Road, Tirupati-517507</div>
+            <div style={{ marginTop: '1rem', fontWeight: 600 }}>{generatedSemesterString}</div>
+            <h2 style={{ marginTop: '1rem', textDecoration: 'underline', fontSize: '1.2rem' }}>Final Marks in Words</h2>
+          </div>
+
+          <div className="print-info">
+            <div>
+              <div><strong>Name of the Subject:</strong> {subjectName || '________________'}</div>
+              <div><strong>Name of the Faculty:</strong> {facultyName || '________________'}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div><strong>Subject Code:</strong> {courseCode || '__________'}</div>
+            </div>
+          </div>
+
+          <table className="print-table final-words-table" style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid black' }}>
+            <thead>
+              <tr>
+                <th rowSpan="2" style={{ border: '1px solid black' }}>S.No</th>
+                <th rowSpan="2" style={{ border: '1px solid black' }}>Roll Number</th>
+                <th rowSpan="2" style={{ border: '1px solid black' }}>Name of the Student</th>
+                <th rowSpan="2" style={{ border: '1px solid black' }}>Total Marks<br/>({calculationMode === 'single' ? '25' : '30'})</th>
+                <th colSpan="2" style={{ border: '1px solid black' }}>Marks in Words</th>
+              </tr>
+              <tr>
+                <th style={{ border: '1px solid black' }}>First Digit in Words</th>
+                <th style={{ border: '1px solid black' }}>Second Digit in Words</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((student, idx) => {
+                const finalMark = getFinalMark(student);
+                return (
+                  <tr key={idx}>
+                    <td style={{ border: '1px solid black' }}>{idx + 1}</td>
+                    <td style={{ border: '1px solid black' }}>{student.rollNo}</td>
+                    <td style={{ border: '1px solid black', textAlign: 'left', paddingLeft: '5px' }}>{student.name}</td>
+                    <td style={{ border: '1px solid black', fontWeight: 'bold' }}>{finalMark}</td>
+                    <td style={{ border: '1px solid black' }}>{DIGIT_WORDS[Math.floor(finalMark / 10)]}</td>
+                    <td style={{ border: '1px solid black' }}>{DIGIT_WORDS[finalMark % 10]}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div className="sign-row">
+            <div className="sign-box">Signature of Faculty</div>
+            <div className="sign-box">HoD</div>
+          </div>
+        </section>
       </div>
     </div>
   );
