@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { FileSpreadsheet, Printer, Trash2, Plus, Layout } from 'lucide-react';
+import { FileSpreadsheet, Printer, Trash2, Plus, Layout, Search, Moon, Sun, Undo2, ClipboardPaste, Save, Eye } from 'lucide-react';
 
 const INITIAL_STUDENT = {
   rollNo: '',
@@ -12,6 +12,7 @@ const INITIAL_STUDENT = {
 };
 
 const WORKSPACE_STORAGE_KEY = 'svce-marks-portal-workspace-v1';
+const PRESETS_STORAGE_KEY = 'svce-marks-portal-presets-v1';
 
 const createDefaultWorkspace = () => ({
   calculationMode: 'single',
@@ -82,6 +83,16 @@ function App() {
   const backupInputRef = useRef(null);
   const [saveStatus, setSaveStatus] = useState('Saved locally');
   const [notice, setNotice] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [undoStudents, setUndoStudents] = useState(null);
+  const [importPreview, setImportPreview] = useState(null);
+  const [pasteText, setPasteText] = useState('');
+  const [showPaste, setShowPaste] = useState(false);
+  const [showPrintReview, setShowPrintReview] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('svce-marks-dark-mode') === 'true');
+  const [presets, setPresets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(PRESETS_STORAGE_KEY)) || []; } catch { return []; }
+  });
 
   // Derived Values
   const generatedSemesterString = useMemo(() => {
@@ -104,6 +115,12 @@ function App() {
     .map(field => ({ row: index + 1, field, message: getMarkError(field, student[field]) }))
     .filter(error => error.message)), [students, activeMarkFields]);
 
+  const completedStudents = useMemo(() => students.filter(student => activeMarkFields.every(field => String(student[field] ?? '').trim() !== '')).length, [students, activeMarkFields]);
+  const visibleStudents = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return students.map((student, index) => ({ student, index })).filter(({ student }) => !query || `${student.rollNo} ${student.name}`.toLowerCase().includes(query));
+  }, [students, searchQuery]);
+
   useEffect(() => {
     try {
       localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
@@ -115,6 +132,15 @@ function App() {
       setSaveStatus('Local save unavailable');
     }
   }, [calculationMode, program, regulation, department, year, semesterNum, examType, examMonthYear, facultyName, courseCode, subjectName, students]);
+
+  useEffect(() => {
+    document.body.classList.toggle('dark-mode', darkMode);
+    localStorage.setItem('svce-marks-dark-mode', String(darkMode));
+  }, [darkMode]);
+
+  useEffect(() => {
+    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
+  }, [presets]);
 
   const applyWorkspace = (workspace) => {
     const normalized = {
@@ -178,7 +204,49 @@ function App() {
       return;
     }
     setNotice('');
-    window.print();
+    setShowPrintReview(true);
+  };
+
+  const savePreset = () => {
+    if (!courseCode && !subjectName && !facultyName) {
+      setNotice('Enter course, subject, or faculty details before saving a preset.');
+      return;
+    }
+    const preset = { id: `${courseCode}-${subjectName}-${Date.now()}`, label: `${courseCode || 'Course'} — ${subjectName || 'Untitled'}`, program, regulation, department, year, semesterNum, facultyName, courseCode, subjectName };
+    setPresets(current => [preset, ...current.filter(item => item.courseCode !== courseCode || item.subjectName !== subjectName)].slice(0, 8));
+    setNotice('Course preset saved on this device.');
+  };
+
+  const loadPreset = (id) => {
+    const preset = presets.find(item => item.id === id);
+    if (!preset) return;
+    setProgram(preset.program); setRegulation(preset.regulation); setDepartment(preset.department);
+    setYear(preset.year); setSemesterNum(preset.semesterNum); setFacultyName(preset.facultyName);
+    setCourseCode(preset.courseCode); setSubjectName(preset.subjectName);
+    setNotice('Course preset loaded.');
+  };
+
+  const applyBulkPaste = () => {
+    const rows = pasteText.trim().split(/\r?\n/).filter(Boolean).map(row => row.split(/[\t,]+/).map(value => value.trim()));
+    if (!rows.length) return;
+    const updated = students.map((student, index) => {
+      const values = rows[index];
+      if (!values) return student;
+      return { ...student, ...Object.fromEntries(activeMarkFields.map((field, fieldIndex) => [field, values[fieldIndex] ?? student[field]])) };
+    });
+    setStudents(updated);
+    setPasteText(''); setShowPaste(false);
+    setNotice(`Applied pasted marks to ${Math.min(rows.length, students.length)} students.`);
+  };
+
+  const moveToNextMark = (event, index, field) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const fieldIndex = activeMarkFields.indexOf(field);
+    const next = fieldIndex === activeMarkFields.length - 1
+      ? `[data-mark-row="${index + 1}"][data-mark-field="${activeMarkFields[0]}"]`
+      : `[data-mark-row="${index}"][data-mark-field="${activeMarkFields[fieldIndex + 1]}"]`;
+    document.querySelector(next)?.focus();
   };
 
   const MarkInput = ({ student, index, field, width }) => {
@@ -195,7 +263,10 @@ function App() {
       aria-label={`${field} marks for ${student.name || `student ${index + 1}`}`}
       aria-invalid={Boolean(error)}
       title={error || `Enter a whole number from 0 to ${MARK_LIMITS[field]}.`}
+      data-mark-row={index}
+      data-mark-field={field}
       onChange={(e) => updateStudentField(index, field, e.target.value)}
+      onKeyDown={(e) => moveToNextMark(e, index, field)}
     />;
   };
 
@@ -282,8 +353,8 @@ function App() {
           setNotice('No students were imported. Use a sheet with Roll No and Name/Name of the Student headers.');
           return;
         }
-        setStudents(importedStudents);
-        setNotice(`${importedStudents.length} students imported successfully.`);
+        setImportPreview(importedStudents);
+        setNotice(`${importedStudents.length} students found. Review and confirm the import below.`);
       } catch {
         setNotice('Could not read that file. Please upload a valid Excel or CSV file.');
       }
@@ -321,9 +392,12 @@ function App() {
     <div className="container" style={{ maxWidth: '1400px' }}>
       <div className="no-print">
         <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-            <h1>Student Marks Portal</h1>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div className="app-header">
+            <div><h1>Student Marks Portal</h1><p className="subtitle">Prepare, review, and print award lists with confidence.</p></div>
+            <div className="header-actions">
+              <button className="icon-btn" onClick={() => setDarkMode(value => !value)} title="Toggle color theme" aria-label="Toggle color theme">
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
               <button className="btn btn-outline" onClick={downloadTemplate} title="Download Excel Template">
                 <FileSpreadsheet size={18} />
                 Template
@@ -345,7 +419,11 @@ function App() {
             </div>
           </div>
 
-          <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '1rem', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+          <nav className="workflow-nav" aria-label="Mark entry workflow">
+            <a href="#details">1. Exam details</a><a href="#students">2. Students</a><a href="#marks">3. Enter marks</a><a href="#review">4. Review & print</a>
+          </nav>
+
+          <div id="details" className="metadata-card">
             <h3 style={{ marginBottom: '1rem', fontSize: '1.1rem', color: '#334155' }}>Exam Metadata</h3>
             <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
               <div className="input-group">
@@ -406,9 +484,16 @@ function App() {
                 <input className="input-field" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} placeholder="e.g. CSEM305" />
               </div>
             </div>
+            <div className="preset-row">
+              <button className="btn btn-outline" onClick={savePreset}><Save size={16} /> Save course preset</button>
+              {presets.length > 0 && <select className="select-field preset-select" defaultValue="" onChange={(e) => loadPreset(e.target.value)}>
+                <option value="" disabled>Load a saved preset</option>
+                {presets.map(preset => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+              </select>}
+            </div>
           </div>
 
-          <div className="button-row">
+          <div id="students" className="button-row">
             <button className="btn btn-primary" onClick={() => fileInputRef.current.click()}>
               <FileSpreadsheet size={18} />
               Import Student Excel
@@ -422,10 +507,22 @@ function App() {
               Clear Workspace
             </button>
           </div>
+          {importPreview && <div className="import-preview">
+            <div><strong>Import preview:</strong> {importPreview.length} students found. First: {importPreview.slice(0, 3).map(student => student.name).join(', ')}.</div>
+            <div><button className="btn btn-primary" onClick={() => { setStudents(importPreview); setImportPreview(null); setNotice('Student list imported successfully.'); }}>Confirm import</button><button className="btn btn-outline" onClick={() => setImportPreview(null)}>Cancel</button></div>
+          </div>}
           <p className="save-status">{saveStatus}. This browser keeps a separate local workspace; use Backup/Restore to move work between devices or users.</p>
           {notice && <p className="notice" role="status">{notice}</p>}
           {markErrors.length > 0 && <p className="notice notice-error" role="alert">{markErrors.length} mark{markErrors.length === 1 ? '' : 's'} need correction before printing.</p>}
 
+          <section id="marks">
+            <div className="entry-toolbar">
+              <div className="summary-cards"><span><strong>{students.length}</strong> students</span><span><strong>{completedStudents}</strong> complete</span><span className={markErrors.length ? 'summary-error' : ''}><strong>{markErrors.length}</strong> errors</span></div>
+              <label className="search-box"><Search size={17} /><input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search roll no. or name" /></label>
+              <button className="btn btn-outline" onClick={() => setShowPaste(value => !value)}><ClipboardPaste size={17} /> Paste marks</button>
+              {undoStudents && <button className="btn btn-outline" onClick={() => { setStudents(undoStudents); setUndoStudents(null); }}><Undo2 size={17} /> Undo removal</button>}
+            </div>
+            {showPaste && <div className="paste-panel"><label>Paste one student per line, using tabs or commas. Columns follow the visible mark order.</label><textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="8, 7, 9, 8, 10, 9, 8" /><div><button className="btn btn-primary" onClick={applyBulkPaste}>Apply pasted marks</button><button className="btn btn-outline" onClick={() => setShowPaste(false)}>Cancel</button></div></div>}
           <div className="table-container">
             <table>
               <thead>
@@ -453,7 +550,7 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {students.map((student, index) => {
+                {visibleStudents.map(({ student, index }) => {
                   const res = calculateResult(student);
                   return (
                     <tr key={index}>
@@ -482,7 +579,7 @@ function App() {
                         </>
                       )}
                       <td>
-                        <button onClick={() => setStudents(students.filter((_, i) => i !== index))} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>
+                        <button aria-label={`Remove ${student.name || 'student'}`} onClick={() => { setUndoStudents(students); setStudents(students.filter((_, i) => i !== index)); }} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>
                           <Trash2 size={18} />
                         </button>
                       </td>
@@ -495,6 +592,10 @@ function App() {
           <button className="btn btn-outline" style={{ marginTop: '1.5rem' }} onClick={() => setStudents([...students, { ...INITIAL_STUDENT }])}>
             <Plus size={18} /> Add Row
           </button>
+          </section>
+          {showPrintReview && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Print review">
+            <div className="review-modal" id="review"><Eye size={28} /><h2>Ready to print?</h2><p>{students.length} students · {completedStudents} complete · {markErrors.length} validation errors</p><p>The printout includes the Award List and the separate Final Marks in Words sheet.</p><div><button className="btn btn-success" onClick={() => { setShowPrintReview(false); window.print(); }}><Printer size={17} /> Print / Save as PDF</button><button className="btn btn-outline" onClick={() => setShowPrintReview(false)}>Back to editing</button></div></div>
+          </div>}
         </div>
       </div>
 

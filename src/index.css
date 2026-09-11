@@ -14,6 +14,16 @@
   --radius: 1rem;
 }
 
+body.dark-mode {
+  --bg-main: #0f172a;
+  --card-bg: #172033;
+  --text-main: #e2e8f0;
+  --text-muted: #a8b4c8;
+  --border: #334155;
+}
+
+body.dark-mode .input-field, body.dark-mode .select-field, body.dark-mode .btn-outline, body.dark-mode th, body.dark-mode .table-container, body.dark-mode .metadata-card, body.dark-mode .paste-panel { background: #1e293b; color: var(--text-main); }
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -47,6 +57,12 @@ h1 {
   margin-bottom: 2rem;
   color: #0f172a;
 }
+
+.app-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.25rem; }
+.app-header h1 { margin-bottom: .25rem; }.subtitle { color: var(--text-muted); }.header-actions { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
+.icon-btn { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: .75rem; background: var(--card-bg); color: var(--text-main); cursor: pointer; }
+.workflow-nav { display: flex; gap: .5rem; flex-wrap: wrap; margin: 0 0 1.5rem; }.workflow-nav a { color: var(--primary); background: #eff6ff; border-radius: 99px; padding: .45rem .8rem; font-weight: 700; font-size: .82rem; text-decoration: none; }
+.metadata-card { background: #f8fafc; padding: 1.5rem; border-radius: 1rem; border: 1px solid #e2e8f0; margin-bottom: 2rem; }.preset-row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }.preset-select { max-width: 330px; padding: .65rem .8rem; }
 
 .form-grid {
   display: grid;
@@ -98,6 +114,13 @@ h1 {
   font-size: 0.875rem;
   margin: -1rem 0 1.5rem;
 }
+
+.import-preview, .paste-panel { border: 1px solid #93c5fd; background: #eff6ff; padding: 1rem; border-radius: .75rem; margin: 0 0 1rem; display: flex; gap: 1rem; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.import-preview > div:last-child, .paste-panel > div { display: flex; gap: .5rem; flex-wrap: wrap; }
+.entry-toolbar { display: flex; gap: .75rem; justify-content: space-between; align-items: center; flex-wrap: wrap; margin: 1.25rem 0 .75rem; }.summary-cards { display: flex; gap: .5rem; flex-wrap: wrap; }.summary-cards span { border: 1px solid var(--border); padding: .45rem .7rem; border-radius: .6rem; background: var(--card-bg); color: var(--text-muted); font-size: .85rem; }.summary-cards strong { color: var(--text-main); }.summary-cards .summary-error { border-color: #fca5a5; color: #b91c1c; }
+.search-box { display: flex; align-items: center; gap: .45rem; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--card-bg); }.search-box input { border: 0; outline: 0; background: transparent; color: var(--text-main); min-width: 210px; }
+.paste-panel { display: block; }.paste-panel label { display: block; font-weight: 600; margin-bottom: .5rem; }.paste-panel textarea { display: block; width: 100%; min-height: 90px; border: 1px solid var(--border); border-radius: .6rem; padding: .7rem; margin: 0 0 .6rem; font-family: inherit; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 10; background: rgb(15 23 42 / .58); display: grid; place-items: center; padding: 1rem; }.review-modal { width: min(460px, 100%); padding: 2rem; border-radius: 1rem; background: var(--card-bg); color: var(--text-main); box-shadow: 0 25px 50px rgb(0 0 0 / .3); text-align: center; }.review-modal h2 { margin: .75rem 0 .5rem; }.review-modal p { color: var(--text-muted); margin-bottom: .75rem; }.review-modal > div { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
 
 .btn {
   display: inline-flex;
@@ -315,4 +338,12 @@ td {
   .form-grid {
     grid-template-columns: 1fr;
   }
+
+  .app-header { flex-direction: column; }
+  .header-actions { justify-content: flex-start; }
+  .workflow-nav { overflow-x: auto; flex-wrap: nowrap; padding-bottom: .25rem; }
+  .workflow-nav a { white-space: nowrap; }
+  .search-box { width: 100%; }
+  .search-box input { width: 100%; min-width: 0; }
+  .entry-toolbar .btn { width: auto; }
 }
